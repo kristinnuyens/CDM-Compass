@@ -1,0 +1,53 @@
+# ----------------------
+# macOS
+# ----------------------
+.DS_Store
+
+# ----------------------
+# Python
+# ----------------------
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# Virtual environment
+.venv/
+venv/
+env/
+
+# ----------------------
+# Jupyter Notebook
+# ----------------------
+.ipynb_checkpoints/
+
+# ----------------------
+# Data (important for your project)
+# ----------------------
+data/processed/
+data/embeddings/
+*.faiss
+*.pkl
+*.npy
+
+# ----------------------
+# Ignore raw PDFs
+# ----------------------
+data/raw/
+
+# ----------------------
+# Logs & temp files
+# ----------------------
+*.log
+*.tmp
+
+# ----------------------
+# VS Code
+# ----------------------
+.vscode/
+
+# ----------------------
+# System / misc
+# ----------------------
+*.swp
+*.swo
