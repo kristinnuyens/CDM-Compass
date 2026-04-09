@@ -10,20 +10,19 @@ Documents are classified by the folder they live in — regulatory requirements 
 > **CDM Compass answers:** *"ICH E6(R2) mandates a risk-based approach to quality management [1]. The SCDM Position Paper recommends expanding these principles to all study design aspects [2]."*
 >
 > **Sources cited:**
-> `⚖️ REGULATORY  🟢 HIGH  [1] ICH-E6-R2.pdf — page 9`
-> `💬 OPINION     🟡 MEDIUM  [2] SCDM-Position-Paper-V9.pdf — page 8`
+> `⚖️ REGULATORY  🟢 HIGH  [1]  ICH-E6-R2.pdf  --  page 9`
+> `💬 OPINION     🟡 MEDIUM  [2]  SCDM-Position-Paper-V9.pdf  --  page 8`
 
 ## ⚙️ One-Time Setup
 
-### Step 1 — Install Ollama (the local AI engine)
+### Step 1 — Install Ollama
 
 1. Go to **[https://ollama.com](https://ollama.com)** and download the app
-2. Install it (drag to Applications on Mac, run installer on Windows/Linux)
-3. Open **Terminal** and run:
+2. Open **Terminal** and run:
    ```bash
    ollama pull mistral
    ```
-   This downloads the Mistral language model (~4 GB). You only do this once.
+   This downloads the Mistral model (~4 GB). You only do this once.
 
 ### Step 2 — Create the document folders
 
@@ -39,6 +38,8 @@ python3 -m venv .venv
 source .venv/bin/activate          # on Windows: .venv\Scripts\activate
 pip install "sentence-transformers[cross-encoder]" chromadb pypdf openpyxl python-docx python-pptx rank-bm25 requests tqdm jupyter ipywidgets
 ```
+
+Note the quotes around `sentence-transformers[cross-encoder]` — required in zsh (Mac default shell).
 
 ### Step 4 — Open the notebook
 
@@ -84,7 +85,7 @@ Run each block **from top to bottom**, in order.
    └── opinion/
        └── SCDM-Position-Paper-V9.pdf
    ```
-2. Re-run **Blocks 3, 4, and 5** in the notebook.
+2. Re-run **Blocks 3, 4, and 5**.
 3. Ask your question in Block 7 or 8.
 
 > 💡 You do **not** need to re-run Blocks 1, 2, or 6 unless you restart Jupyter.
@@ -100,21 +101,21 @@ Run each block **from top to bottom**, in order.
 
 Each question goes through a three-stage pipeline:
 
-### Stage 1 — Hybrid Search
-Two indexes are queried simultaneously:
+**Stage 1 — Hybrid search**
+Two indexes queried simultaneously and combined:
 
 | Index | Type | Good at |
 |-------|------|---------|
 | ChromaDB | Semantic (vector) | Meaning, synonyms, paraphrases |
 | BM25 | Keyword | Exact terms, IDs, regulation numbers |
 
-Both scores are combined using configurable weights (default: 70% semantic / 30% keyword).
+Default weighting: 70% semantic / 30% keyword (tunable in Block 7).
 
-### Stage 2 — Reranking
-A cross-encoder model (`ms-marco-MiniLM-L-6-v2`) re-scores the top candidates by reading the question and each chunk together — much more precise than embedding similarity alone. The best `FINAL_K` chunks are selected for the LLM.
+**Stage 2 — Reranking**
+A cross-encoder (`ms-marco-MiniLM-L-6-v2`) re-scores all candidates by reading the question and each chunk together — much more precise than embedding similarity alone. The best `FINAL_K` chunks are selected.
 
-### Stage 3 — Contextual Compression
-Before reaching the LLM, each chunk is compressed to only its most relevant sentences. This reduces noise, improves answer focus, and makes better use of the context window.
+**Stage 3 — Contextual compression**
+Each chunk is compressed to its most relevant sentences before reaching the LLM, reducing noise and improving answer focus.
 
 ## 💬 Reading the Output
 
@@ -123,9 +124,10 @@ Language is calibrated automatically to source authority:
 - Regulatory sources → *must, shall, is required*
 - Opinion sources → *recommends, suggests, proposes*
 
-Citations appear inline as `[1]`, `[2]` etc. The bracket number in the answer always matches the bracket number in the sources list. Only sources the LLM actually cited are shown.
+Citations appear as `[1]`, `[2]` etc. — bracket number only, nothing else inline.
 
 ### Sources cited
+Sources appear **in the order they are cited in the answer** — the bracket numbers match exactly. Gaps in numbering (e.g. [1], [2], [4]) mean those chunks were retrieved but the LLM did not use them.
 
 **Authority badge:**
 
@@ -142,18 +144,31 @@ Citations appear inline as `[1]`, `[2]` etc. The bracket number in the answer al
 | 🟡 MEDIUM | 0.5 – 0.65 | Partial match |
 | 🔴 LOW | > 0.65 | Weak match |
 
-Each source also shows its **rerank score** (higher = more relevant per cross-encoder), **semantic score**, and **keyword score** — useful for understanding why a source was selected.
+Each source also shows its **rerank score** (higher = more relevant per cross-encoder), **semantic score**, and **keyword score**.
 
 ## 🔧 Tuning
 
-| Setting | Where | What it does |
-|---------|-------|-------------|
-| `TOP_K` | Block 7 | Candidates retrieved before reranking — increase if answers miss known sources |
-| `FINAL_K` | Block 7 | Chunks sent to LLM after reranking — increase for broader answers |
-| `SEMANTIC_WEIGHT` | Block 7 | Raise for conceptual questions |
-| `KEYWORD_WEIGHT` | Block 7 | Raise for specific terms, IDs, clause numbers |
-| `CHUNK_SIZE` | Block 4 | Lower (e.g. 200) for more precise citations |
-| `OLLAMA_MODEL` | Block 6 | Switch between `mistral`, `llama3.2`, `phi3` |
+All settings are at the top of Block 7:
+
+| Setting | Default | Effect |
+|---------|---------|--------|
+| `TOP_K` | 10 | Candidates retrieved before reranking — increase if answers miss known sources |
+| `FINAL_K` | 5 | Chunks sent to LLM — increase for broader answers |
+| `SEMANTIC_WEIGHT` | 0.7 | Raise for conceptual questions |
+| `KEYWORD_WEIGHT` | 0.3 | Raise for specific terms, IDs, clause numbers |
+| `CHUNK_SIZE` (Block 4) | 300 | Lower (e.g. 200) for more precise citations |
+
+## 🔧 Changing the AI Model
+
+Edit **Block 6**:
+
+```python
+OLLAMA_MODEL = "mistral"    # balanced — recommended
+OLLAMA_MODEL = "llama3.2"   # strong alternative
+OLLAMA_MODEL = "phi3"       # fastest — follows citation format less reliably
+```
+
+To download a model: `ollama pull llama3.2`
 
 ## ❓ Troubleshooting
 
@@ -162,16 +177,16 @@ Each source also shows its **rerank score** (higher = more relevant per cross-en
 | *"Cannot connect to Ollama"* | Open the Ollama app, or run `ollama serve` in Terminal |
 | *"Cannot classify: filename.pdf"* | Move the file into `regulatory/` or `opinion/` subfolder |
 | *"Skipped (old format): file.ppt"* | Convert to `.pptx`: PowerPoint → File → Save As → PowerPoint Presentation |
-| No sources listed after answer | LLM did not cite inline — try `mistral`, increase `TOP_K`, or rephrase the question |
-| Answers seem incomplete | Increase `TOP_K` to 15 and `FINAL_K` to 7 in Block 7 |
-| Block 5 slow on first run | Embedding and reranker models download once and are cached after that |
+| `zsh: no matches found: sentence-transformers[...]` | Add quotes: `pip install "sentence-transformers[cross-encoder]"` |
+| No sources listed after answer | LLM did not cite inline — try `mistral`, increase `TOP_K`, or rephrase |
+| Answers seem incomplete | Increase `TOP_K` to 15 and `FINAL_K` to 7 |
+| Block 5 slow on first run | Models download once and are cached after that |
 
 ## 🗂️ Project Structure
 
 ```
 CDM-Compass/
-├── notebooks/
-│   └── CDM_Compass.ipynb      ← main notebook
+├── CDM_Compass.ipynb          ← main notebook
 ├── README.md                  ← this file
 └── data/
     └── raw/
@@ -187,14 +202,17 @@ CDM-Compass/
 | Folder-based authority classification (regulatory / opinion) | ✅ |
 | Error on unclassified files | ✅ |
 | Hybrid search (semantic + BM25, tunable weights) | ✅ |
-| Cross-encoder reranking for precision | ✅ |
+| Cross-encoder reranking | ✅ |
 | Contextual compression (relevant sentences only) | ✅ |
-| Batched ChromaDB indexing (handles large document sets) | ✅ |
+| Batched ChromaDB indexing | ✅ |
 | Regulatory sources ranked first | ✅ |
 | Authority-aware LLM language (must vs recommends) | ✅ |
-| Inline bracket citations — [N] in answer maps to [N] in sources | ✅ |
+| Citations as [N] only — no filename inline | ✅ |
+| Sources shown in answer-citation order | ✅ |
+| Gaps in numbering explained | ✅ |
 | Only cited sources shown | ✅ |
 | Colour-coded authority and relevance badges | ✅ |
+| Filename and page on separate line from badge | ✅ |
 | Wrapped, readable output | ✅ |
 | Local LLM via Ollama | ✅ |
 | Interactive Q&A loop (Block 8) | ✅ |
@@ -203,9 +221,9 @@ CDM-Compass/
 
 - **Hybrid search weight auto-tuning** — detect query type and adjust weights automatically
 - **Agentic retrieval** — let the LLM decide when to search again if first results are insufficient
-- **Semantic caching** — reuse answers for similar questions to reduce response time
-- **Improved heading extraction** from PDFs for more accurate source references
-- **CLI tool** for faster queries without opening Jupyter
+- **Semantic caching** — reuse answers for similar questions
+- **Improved heading extraction** from PDFs
+- **CLI tool** for faster queries without Jupyter
 - **Docker packaging** for reproducible deployment
 
-> 💡 Note: documents are not included in this repository. Place your own reference files in `data/raw/regulatory/` or `data/raw/opinion/`.
+> 💡 Documents are not included in this repository. Place your own files in `data/raw/regulatory/` or `data/raw/opinion/`.
