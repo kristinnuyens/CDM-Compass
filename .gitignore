@@ -11,7 +11,9 @@ __pycache__/
 *.pyo
 *.pyd
 
+# ----------------------
 # Virtual environment
+# ----------------------
 .venv/
 venv/
 env/
@@ -29,6 +31,11 @@ data/embeddings/
 *.faiss
 *.pkl
 *.npy
+
+# ----------------------
+# Drafts versions
+# ----------------------
+drafts/
 
 # ----------------------
 # Ignore raw PDFs

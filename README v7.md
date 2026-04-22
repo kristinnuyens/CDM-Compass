@@ -2,7 +2,9 @@
 **Clinical Data Management Knowledge Navigator**
 
 Ask questions about your CDM/CDS documents in plain English and get answers with inline citations.
-Documents are classified by the folder they live in. The interactive loop remembers your last few questions within a session, so follow-up questions work naturally.
+Documents are classified by folder — regulatory requirements and opinion papers are treated differently
+in every answer. Version conflicts are detected and resolved before the LLM sees them. The interactive
+loop remembers your last few questions within a session.
 
 **Example:**
 > **You ask:** *"What does guidance say about RBQM?"*
@@ -37,10 +39,8 @@ mkdir -p data/raw/opinion
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate          # on Windows: .venv\Scripts\activate
-pip install "sentence-transformers[cross-encoder]" chromadb pypdf openpyxl python-docx python-pptx rank-bm25 requests tqdm jupyter ipywidgets
+pip install sentence-transformers chromadb pypdf openpyxl python-docx python-pptx rank-bm25 requests tqdm jupyter ipywidgets
 ```
-
-> Note the quotes around `sentence-transformers[cross-encoder]` — required in zsh (Mac default shell).
 
 ### Step 4 — Open the notebook
 
@@ -91,47 +91,56 @@ Run each block **from top to bottom**, in order.
 | Situation | What to do |
 |-----------|------------|
 | Updated document, old version no longer valid | Delete old file, drop in new one with same filename, re-run Blocks 3–5 |
-| Keep both versions for comparison | Rename with version numbers (e.g. `SCDM-v8.pdf` and `SCDM-v9.pdf`), keep both in same subfolder, re-run Blocks 3–5 |
+| Keep both versions | Use version numbers in filenames — e.g. `ICH-E6-v2.pdf` and `ICH-E6-v3.pdf`. CDM Compass will detect conflicts and keep the later version automatically |
 
 ---
 
 ## 🔍 How CDM Compass Finds Answers
 
-Each question goes through a four-stage pipeline:
+Each question goes through a five-stage pipeline:
 
-**Stage 1 — Hybrid search**
+**Stage 1 — Paragraph chunking (Block 4)**
+Text is split at natural paragraph boundaries. Short paragraphs are merged; long ones are split at sentence boundaries. One-sentence overlap preserves context across boundaries. Every chunk is a complete semantic unit — a full regulatory clause or recommendation, not an arbitrary word slice.
+
+**Stage 2 — Hybrid search**
 
 | Index | Type | Good at |
 |-------|------|---------|
 | ChromaDB | Semantic (vector) | Meaning, synonyms, paraphrases |
 | BM25 | Keyword | Exact terms, IDs, regulation numbers |
 
-Default weighting: 70% semantic / 30% keyword (tunable in Block 7).
+Default: 70% semantic / 30% keyword (tunable in Block 7).
 
-**Stage 2 — Reranking**
-A cross-encoder (`ms-marco-MiniLM-L-12-v2`) re-scores all candidates by reading question + chunk together. More accurate than embedding similarity alone. Best `FINAL_K` chunks selected.
+**Stage 3 — Reranking**
+`ms-marco-MiniLM-L-12-v2` cross-encoder re-scores all candidates by reading question + chunk together. More accurate than embedding similarity alone. Best `FINAL_K` chunks selected.
 
-**Stage 3 — Contextual compression**
-Each chunk is compressed to its most relevant sentences before reaching the LLM. Reduces noise, improves answer focus.
+**Stage 4 — Conflict detection**
+Before the LLM sees any context, CDM Compass checks the retrieved chunks for version conflicts. If two chunks from the same source file contain contradictory numbers or contradiction signals (e.g. "no longer required" vs "required"), the older chunk is removed and a warning is shown. This prevents the LLM from silently choosing an outdated value — a critical safeguard for regulatory documents.
 
-**Stage 4 — Context-aware answer**
-The last `HISTORY_TURNS` (default: 3) question/answer pairs from the session are included as context. Follow-up questions like *"Then how does that apply to RBQM?"* work naturally. Set `HISTORY_TURNS = 0` in Block 7 to turn this off.
+**Resolution rule:** the chunk from the lexicographically later filename is kept. This means `ICH-E6-v3.pdf` beats `ICH-E6-v2.pdf`, and `policy-2024.pdf` beats `policy-2023.pdf`. Use version numbers or dates in filenames for this to work correctly.
+
+**Stage 5 — Context-aware answer**
+Each chunk is compressed to its most relevant sentences. The last `HISTORY_TURNS` (default: 3) Q&A pairs are included so follow-up questions work naturally.
 
 ---
 
 ## 💬 Reading the Output
 
-A token estimate is printed before each answer. If it exceeds `TOKEN_WARN_LIMIT` (default: 3000 tokens), CDM Compass will warn you — reduce `HISTORY_TURNS` or `FINAL_K` if this happens regularly.
+### Conflict warnings
+If a version conflict is detected and resolved, a warning appears before the answer:
+```
+⚠️  Conflict (numerical): kept ICH-E6-v3.pdf p.12 -- removed ICH-E6-v2.pdf p.12
+```
+This means CDM Compass found contradictory content between two versions of the same document and removed the older one. The answer is based only on the retained version.
 
 ### Answer
-Language is calibrated to source authority automatically:
-- Regulatory → *must, shall, is required*
-- Opinion → *recommends, suggests, proposes*
+- Regulatory sources → *must, shall, is required*
+- Opinion sources → *recommends, suggests, proposes*
 
-Citations appear as `[1]`, `[2]` etc. — bracket number only. The number in the answer matches the number in the sources list.
+Citations as `[1]`, `[2]` — bracket number only. The number in the answer matches the number in the sources list.
 
 ### Sources cited
-Sources appear **in the order they are cited in the answer**. Gaps (e.g. [1],[2],[4]) mean those chunks were retrieved but not used by the LLM.
+Sources appear **in the order cited in the answer**. Gaps (e.g. [1],[2],[4]) mean those chunks were retrieved but not cited.
 
 **Authority badge:**
 
@@ -148,23 +157,27 @@ Sources appear **in the order they are cited in the answer**. Gaps (e.g. [1],[2]
 | 🟡 MEDIUM | 0.5 – 0.65 | Partial match |
 | 🔴 LOW | > 0.65 | Weak match |
 
-Each source also shows its rerank score (higher = better), semantic score, and keyword score.
-
 ---
 
 ## 🔧 Tuning
 
-All settings are at the top of Block 7:
+All settings at the top of Block 7:
 
 | Setting | Default | Effect |
 |---------|---------|--------|
 | `TOP_K` | 10 | Candidates before reranking — raise if answers miss known sources |
 | `FINAL_K` | 5 | Chunks sent to LLM — raise for broader answers |
 | `HISTORY_TURNS` | 3 | Conversation memory window (0 = off) |
-| `TOKEN_WARN_LIMIT` | 3000 | Warn if estimated prompt size exceeds this |
+| `TOKEN_WARN_LIMIT` | 3000 | Warn if prompt exceeds this token estimate |
 | `SEMANTIC_WEIGHT` | 0.7 | Raise for conceptual questions |
 | `KEYWORD_WEIGHT` | 0.3 | Raise for specific terms, IDs, clause numbers |
-| `CHUNK_SIZE` (Block 4) | 300 | Lower (e.g. 200) for more precise citations |
+
+Chunking settings in Block 4 (re-run Blocks 4 and 5 after changing):
+
+| Setting | Default | Effect |
+|---------|---------|--------|
+| `MIN_PARA_WORDS` | 30 | Merge paragraphs shorter than this |
+| `MAX_PARA_WORDS` | 400 | Split paragraphs longer than this |
 
 ---
 
@@ -173,7 +186,7 @@ All settings are at the top of Block 7:
 Edit **Block 6**:
 
 ```python
-OLLAMA_MODEL = "qwen2.5:14b"   # recommended
+OLLAMA_MODEL = "qwen2.5:14b"   # recommended — best citation reliability
 OLLAMA_MODEL = "mistral"       # good alternative
 OLLAMA_MODEL = "llama3.2"      # also solid
 OLLAMA_MODEL = "phi3"          # fastest — least reliable on citations
@@ -188,10 +201,10 @@ OLLAMA_MODEL = "phi3"          # fastest — least reliable on citations
 | *"Cannot connect to Ollama"* | Open the Ollama app, or run `ollama serve` in Terminal |
 | *"Cannot classify: filename.pdf"* | Move the file into `regulatory/` or `opinion/` subfolder |
 | *"Skipped (old format): file.ppt"* | Convert: PowerPoint → File → Save As → PowerPoint Presentation (.pptx) |
-| `zsh: no matches found: sentence-transformers[...]` | Add quotes: `pip install "sentence-transformers[cross-encoder]"` |
+| `zsh: no matches found: sentence-transformers[...]` | Package name changed — use: `pip install sentence-transformers` (no brackets needed) |
+| Conflict warning appears | CDM Compass removed an older document version — check the warning to confirm it kept the right one |
 | No sources listed after answer | LLM did not cite inline — try `qwen2.5:14b`, increase `TOP_K`, or rephrase |
 | Token warning printed | Reduce `HISTORY_TURNS` or `FINAL_K` in Block 7 |
-| Follow-up questions not working | Make sure `HISTORY_TURNS > 0` in Block 7 and you are using Block 8 |
 | Block 5 slow on first run | Models download once and are cached after that |
 
 ---
@@ -220,12 +233,14 @@ CDM-Compass/
 | Load PDF, PPTX, XLSX, DOCX, JSON, XML, CSV, TXT | ✅ |
 | Folder-based authority classification (regulatory / opinion) | ✅ |
 | Error on unclassified files | ✅ |
+| Paragraph-based chunking (complete semantic units) | ✅ |
 | Hybrid search (semantic + BM25, tunable weights) | ✅ |
-| Cross-encoder reranking (`ms-marco-MiniLM-L-12-v2`) | ✅ |
+| Cross-encoder reranking (ms-marco-MiniLM-L-12-v2) | ✅ |
+| Conflict detection — removes superseded document versions | ✅ |
 | Contextual compression (relevant sentences only) | ✅ |
 | Conversation memory (rolling window, configurable) | ✅ |
 | Token budget awareness (estimate + warning) | ✅ |
-| Batched ChromaDB indexing | ✅ |
+| Batched ChromaDB indexing (handles large document sets) | ✅ |
 | Regulatory sources ranked first | ✅ |
 | Authority-aware LLM language (must vs recommends) | ✅ |
 | Citations as [N] only — no filename inline | ✅ |
@@ -233,20 +248,17 @@ CDM-Compass/
 | Only cited sources shown | ✅ |
 | Colour-coded authority and relevance badges | ✅ |
 | Wrapped, readable output | ✅ |
-| Local LLM via Ollama (`qwen2.5:14b` recommended) | ✅ |
-| Interactive Q&A loop with session memory (Block 8) | ✅ |
+| Local LLM via Ollama (qwen2.5:14b recommended) | ✅ |
+| Interactive Q&A loop with session memory | ✅ |
 
 ---
 
 ## 🔮 Future Ideas
 
-- **Fine-tuning the reranker on CDM data** — training `ms-marco-MiniLM-L-12-v2` on CDM-specific Q&A pairs would dramatically improve relevance for specialist terms (same domain-vocabulary problem demonstrated in legal document fine-tuning, where accuracy went from 30% to 95% on just 72 training pairs)
+- **RAGAS evaluation** — measure context recall, precision, faithfulness, and answer relevancy on a labelled test set of CDM questions; gives objective evidence of whether changes actually help
+- **Fine-tuning the reranker on CDM data** — BCE fine-tuning on CDM-specific Q&A pairs improves domain relevance significantly (legal document experiments: 30% → 95% accuracy on just 72 training pairs)
 - **Persistent memory across sessions** — save conversation history to SQLite so context survives Jupyter restarts
 - **Hybrid search weight auto-tuning** — detect query type and adjust weights automatically
 - **Agentic retrieval** — let the LLM re-query if first results are insufficient
-- **Semantic caching** — reuse answers for similar questions (useful if CDM Compass becomes a shared team tool)
-- **Improved heading extraction** from PDFs
-- **CLI tool** for faster queries without Jupyter
-- **Docker packaging** for reproducible deployment
 
 > 💡 Documents are not included in this repository. Place your own files in `data/raw/regulatory/` or `data/raw/opinion/`.
